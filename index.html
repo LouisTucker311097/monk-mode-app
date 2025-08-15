@@ -55,7 +55,6 @@
 
   /* Main container */
   .container{ max-width:840px; margin: 10px auto 110px; padding:0 14px; }
-  .daily-budget{ font-size:18px; font-weight:700; margin-bottom:12px; text-align:center; }
   .tiles{ display:flex; flex-direction:column; gap:12px; }
 
   /* Tile */
@@ -75,14 +74,6 @@
   }
   .tile .name{ font-weight:800; font-size:16px; letter-spacing:.2px; }
   .tile .value{ font-weight:700; font-size:14px; color:#dfe3ed; }
-  .tile .delete-tile{
-    position:absolute; top:8px; left:8px;
-    color:var(--danger);
-    font-weight:bold;
-    font-size:16px;
-    cursor:pointer;
-    z-index:3;
-  }
 
   /* progress background/fill */
   .bar{
@@ -175,7 +166,7 @@
   .confirm .rowbtn .btn{ min-width:110px; }
 
   /* Setup form */
-  .formgrid{ display:grid; gap:20px; width:100%; } /* Increased gap for dropdowns */
+  .formgrid{ display:grid; gap:12px; width:100%; }
   .field{ display:flex; flex-direction:column; gap:6px; background:#141a26; border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
   .field label{ font-size:12px; color:var(--muted); }
   .field input[type="text"], .field input[type="number"], .field input[type="date"], .field input[type="color"]{
@@ -191,7 +182,6 @@
 
   <!-- Top Week Selector -->
   <div class="topbar">
-    <div class="daily-budget" id="dailyBudget">Daily: 0</div>
     <div id="week" class="week"></div>
   </div>
 
@@ -294,6 +284,7 @@
   </div>
 
 <script>
+/* ================= Helpers & Storage ================= */
 const $ = s => document.querySelector(s);
 const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -301,7 +292,7 @@ const iso = d => d.toISOString().slice(0,10);
 
 function startOfWeek(date){
   const d = new Date(date);
-  const day = (d.getDay()+6)%7;
+  const day = (d.getDay()+6)%7; // Monday=0
   d.setDate(d.getDate()-day);
   d.setHours(0,0,0,0);
   return d;
@@ -362,12 +353,6 @@ function deleteTileEverywhere(tileId){
   }
   save();
 }
-function calculateDailyBudget(){
-  let total = 0;
-  const tiles = state.tiles.filter(t=>inRange(t, activeDate));
-  for(const t of tiles) total += getValue(t.id, activeDate);
-  $('#dailyBudget').textContent = `Daily: ${nf.format(total)}`;
-}
 
 function renderTiles(){
   const list = $('#tiles'); list.innerHTML='';
@@ -375,34 +360,211 @@ function renderTiles(){
 
   tiles.forEach(tile=>{
     const v = getValue(tile.id, activeDate);
-    const div = document.createElement('div');
-    div.className='tile';
-    div.innerHTML=`
-      <div class="delete-tile" title="Delete">×</div>
+    const pct = tile.goal>0 ? clamp(v/tile.goal, 0, 1) : 0;
+
+    const el = document.createElement('div');
+    el.className = 'tile';
+    el.innerHTML = `
+      <div class="bar bar-bg" style="background:${tile.color}"></div>
+      <div class="bar bar-fill" style="background:${tile.color}; width:${pct*100}%"></div>
       <div class="row">
-        <span class="name">${escapeHTML(tile.name)}</span>
-        <span class="value">${nf.format(v)}</span>
-      </div>`;
-    div.querySelector('.delete-tile').addEventListener('click', e=>{
-      e.stopPropagation();
-      if(confirm(`Delete ${tile.name}?`)) { deleteTileEverywhere(tile.id); renderAll(); }
-    });
-    list.appendChild(div);
+        <div class="name">${escapeHTML(tile.name)}</div>
+        <div class="value">${nf.format(v)}</div>
+      </div>
+    `;
+    el.addEventListener('click', ()=>openDetail(tile.id));
+    list.appendChild(el);
   });
 
+  // Faded "Add Tile"
   const addTile = document.createElement('div');
-  addTile.className='tile add';
-  addTile.innerHTML='<div class="plus">+ Add Tile</div>';
-  addTile.addEventListener('click', ()=>{ $('#setupOverlay').style.display='grid'; });
+  addTile.className = 'tile add';
+  addTile.innerHTML = `
+    <div class="plus">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 5v14M5 12h14"/>
+      </svg>
+      <span>Add Tile</span>
+    </div>`;
+  addTile.addEventListener('click', openSetup);
   list.appendChild(addTile);
-
-  calculateDailyBudget();
 }
 
-function renderAll(){
-  renderWeek();
+/* ================= Detail View ================= */
+const ringSvg = $('#ringSvg');
+let ringFG=null, ringBG=null, ringCircum=0;
+
+function buildRing(color){
+  ringSvg.innerHTML='';
+  const size=280, stroke=14, r=(size/2)-stroke, c=2*Math.PI*r;
+
+  const mk = (name, attrs) => {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+    for(const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  };
+
+  const bg = mk('circle', {cx:size/2, cy:size/2, r:r, fill:'none', stroke:color, 'stroke-opacity':'0.22', 'stroke-width':stroke});
+  const fg = mk('circle', {cx:size/2, cy:size/2, r:r, fill:'none', stroke:color, 'stroke-width':stroke, 'stroke-linecap':'round'});
+  fg.setAttribute('stroke-dasharray', `${c} ${c}`);
+  fg.setAttribute('stroke-dashoffset', `${c}`);
+
+  ringSvg.appendChild(bg);
+  ringSvg.appendChild(fg);
+  ringFG = fg; ringBG = bg; ringCircum = c;
+}
+
+function animateRingTo(pct){
+  pct = clamp(pct,0,1);
+  const target = ringCircum * (1 - pct);
+  ringFG.style.transition = 'stroke-dashoffset .45s ease';
+  // stroke-dashoffset is measured from full circle (c) but we rotated -90deg, so we draw pct
+  ringFG.style.strokeDashoffset = String(ringCircum - (ringCircum * pct));
+}
+
+function openDetail(tileId){
+  activeTileId = tileId;
+  const tile = state.tiles.find(t=>t.id===tileId);
+  if(!tile) return;
+  $('#detailTitle').textContent = tile.name;
+
+  buildRing(tile.color);
+  const v = getValue(tile.id, activeDate);
+  $('#ringCurrent').textContent = nf.format(v);
+  $('#ringGoal').textContent = `Goal: ${nf.format(tile.goal||0)}`;
+  animateRingTo(tile.goal>0 ? v/tile.goal : 0);
+
+  $('#detailOverlay').style.display='grid';
+  $('#detailOverlay').setAttribute('aria-hidden','false');
+}
+
+function closeDetail(){
+  $('#detailOverlay').style.display='none';
+  $('#detailOverlay').setAttribute('aria-hidden','true');
+  activeTileId = null;
   renderTiles();
 }
+
+/* ================= Confirm Dialog ================= */
+let confirmResolve = null;
+function confirmDialog(title, message){
+  $('#confirmTitle').textContent = title;
+  $('#confirmMessage').textContent = message;
+  $('#confirmWrap').style.display='grid';
+  $('#confirmWrap').setAttribute('aria-hidden','false');
+  return new Promise(res=>{ confirmResolve = res; });
+}
+$('#confirmNo').addEventListener('click', ()=>{
+  $('#confirmWrap').style.display='none';
+  $('#confirmWrap').setAttribute('aria-hidden','true');
+  confirmResolve && confirmResolve(false);
+});
+$('#confirmYes').addEventListener('click', ()=>{
+  $('#confirmWrap').style.display='none';
+  $('#confirmWrap').setAttribute('aria-hidden','true');
+  confirmResolve && confirmResolve(true);
+});
+
+/* ================= Setup (Add Tile) ================= */
+function openSetup(){
+  $('#fName').value='';
+  $('#fGoal').value='';
+  $('#fStart').value = activeDate;
+  $('#fEnd').value = '';
+  $('#fColor').value = '#6b8cff';
+  $('#setupOverlay').style.display='grid';
+  $('#setupOverlay').setAttribute('aria-hidden','false');
+}
+function closeSetup(){
+  $('#setupOverlay').style.display='none';
+  $('#setupOverlay').setAttribute('aria-hidden','true');
+}
+$('#setupSave').addEventListener('click', ()=>{
+  const name = ($('#fName').value||'').trim();
+  let goal = parseFloat($('#fGoal').value||'0'); if(!isFinite(goal)||goal<0) goal=0;
+  const startDate = $('#fStart').value || null;
+  const endDate = ($('#fEnd').value||'').trim() || null;
+  const color = $('#fColor').value || '#6b8cff';
+  if(!name){ alert('Please enter a name.'); return; }
+
+  state.tiles.push({
+    id: 't'+Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+    name, goal, startDate, endDate, color
+  });
+  save();
+  closeSetup();
+  renderAll();
+});
+$('#setupBack').addEventListener('click', closeSetup);
+
+/* ================= Detail Buttons ================= */
+$('#detailBack').addEventListener('click', closeDetail);
+
+$('#detailDelete').addEventListener('click', async ()=>{
+  if(activeTileId==null) return;
+  const tile = state.tiles.find(t=>t.id===activeTileId);
+  const ok = await confirmDialog('Delete tile', `Delete “${tile?.name}”? This removes it from all days.`);
+  if(ok){ deleteTileEverywhere(activeTileId); closeDetail(); }
+});
+
+$('#btnAdd').addEventListener('click', ()=>{
+  if(activeTileId==null) return;
+  const tile = state.tiles.find(t=>t.id===activeTileId);
+  const input = prompt(`Add to "${tile.name}"\nEnter amount to add:`, '0');
+  if(input===null) return;
+  let add = parseFloat(String(input).replace(/,/g,''));
+  if(!isFinite(add)) add = 0;
+  const current = getValue(tile.id, activeDate);
+  const next = current + add;
+  setValue(tile.id, activeDate, next);
+
+  // update UI
+  $('#ringCurrent').textContent = nf.format(next);
+  $('#ringGoal').textContent = `Goal: ${nf.format(tile.goal||0)}`;
+  animateRingTo(tile.goal>0 ? next/tile.goal : 0);
+});
+
+$('#btnGoal').addEventListener('click', ()=>{
+  if(activeTileId==null) return;
+  const tile = state.tiles.find(t=>t.id===activeTileId);
+  const input = prompt(`Set goal for "${tile.name}":`, String(tile.goal||0));
+  if(input===null) return;
+  let g = parseFloat(String(input).replace(/,/g,''));
+  if(!isFinite(g)||g<0) g=0;
+  tile.goal = g; save();
+
+  const v = getValue(tile.id, activeDate);
+  $('#ringGoal').textContent = `Goal: ${nf.format(tile.goal||0)}`;
+  animateRingTo(tile.goal>0 ? v/tile.goal : 0);
+});
+
+$('#btnReset').addEventListener('click', async ()=>{
+  if(activeTileId==null) return;
+  const tile = state.tiles.find(t=>t.id===activeTileId);
+  const ok = await confirmDialog('Reset to zero', `Reset "${tile.name}" for this day to 0?`);
+  if(!ok) return;
+  setValue(tile.id, activeDate, 0);
+  $('#ringCurrent').textContent = '0';
+  animateRingTo(0);
+});
+
+/* ================= Swipe Navigation (mobile) ================= */
+let touchStartX=null;
+document.addEventListener('touchstart', e=>{
+  if(e.touches.length===1) touchStartX = e.touches[0].clientX;
+},{passive:true});
+document.addEventListener('touchend', e=>{
+  if(touchStartX==null) return;
+  const dx = e.changedTouches[0].clientX - touchStartX; touchStartX=null;
+  if(Math.abs(dx)<50) return;
+  const d = new Date(activeDate);
+  d.setDate(d.getDate() + (dx<0 ? 1 : -1)); // left swipe -> next day
+  activeDate = iso(d);
+  renderAll();
+},{passive:true});
+
+/* ================= Bootstrap ================= */
+function renderAll(){ renderWeek(); renderTiles(); }
 renderAll();
 </script>
 </body>
