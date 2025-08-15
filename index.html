@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monk Mode</title>
+<style>
+  :root{
+    --bg:#0f1116;
+    --panel:#151b22;
+    --panel-2:#1a202b;
+    --text:#eef1f7;
+    --muted:#9aa0ad;
+    --border:#242b39;
+    --danger:#ff5b6a;
+    --shadow: 0 10px 28px rgba(0,0,0,.35);
+    --r:14px;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    background:
+      radial-gradient(1200px 600px at 50% -220px, #20283a 0%, rgba(32,40,58,0.65) 35%, rgba(15,17,22,0) 60%),
+      var(--bg);
+    color:var(--text);
+  }
+
+  /* Top bar */
+  .topbar{
+    position:sticky; top:0; z-index:5;
+    padding:12px 14px 6px;
+    background:linear-gradient(180deg, rgba(10,12,18,.9), rgba(10,12,18,.55) 65%, rgba(10,12,18,0));
+    backdrop-filter: blur(6px);
+    border-bottom:1px solid rgba(255,255,255,.04);
+  }
+  .week{
+    display:flex; gap:8px; align-items:center; justify-content:space-between;
+  }
+  .day{
+    flex:1; padding:8px 0; text-align:center;
+    border:1px solid var(--border);
+    background:var(--panel);
+    color:var(--muted);
+    border-radius:10px;
+    cursor:pointer; user-select:none;
+    transition: transform .06s ease;
+  }
+  .day:active{ transform: translateY(1px); }
+  .day .dow{ display:block; font-size:12px; font-weight:700; letter-spacing:.2px; }
+  .day .date{ display:block; font-size:11px; opacity:.9; margin-top:2px; }
+  .day.today{ outline:2px solid #6b8cff; color:var(--text); }
+  .day.active{ background:#1e2532; color:var(--text); }
+
+  /* Main container */
+  .container{ max-width:840px; margin: 10px auto 110px; padding:0 14px; }
+  .daily-budget{ font-size:18px; font-weight:700; margin-bottom:12px; text-align:center; }
+  .tiles{ display:flex; flex-direction:column; gap:12px; }
+
+  /* Tile */
+  .tile{
+    position:relative; overflow:hidden;
+    border:1px solid var(--border);
+    background:var(--panel);
+    border-radius: var(--r);
+    box-shadow: var(--shadow);
+    padding:16px;
+    min-height:62px;
+    cursor:pointer;
+  }
+  .tile .row{
+    position:relative; z-index:2;
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .tile .name{ font-weight:800; font-size:16px; letter-spacing:.2px; }
+  .tile .value{ font-weight:700; font-size:14px; color:#dfe3ed; }
+  .tile .delete-tile{
+    position:absolute; top:8px; left:8px;
+    color:var(--danger);
+    font-weight:bold;
+    font-size:16px;
+    cursor:pointer;
+    z-index:3;
+  }
+
+  /* progress background/fill */
+  .bar{
+    position:absolute; inset:0; z-index:1;
+  }
+  .bar-bg{ opacity:.22; }
+  .bar-fill{
+    width:0%; transition: width .35s ease;
+    mix-blend-mode: screen;
+  }
+
+  /* Add tile (faded) */
+  .tile.add{
+    display:flex; align-items:center; justify-content:center;
+    background: linear-gradient(180deg, #141a26, #111722);
+    color:var(--muted);
+    border-style:dashed;
+  }
+  .tile.add .plus{ display:flex; gap:10px; align-items:center; font-weight:800; opacity:.85; }
+  .tile.add svg{ width:20px; height:20px; }
+
+  /* Overlays */
+  .overlay{
+    position:fixed; inset:0; display:none; place-items:center; z-index:20;
+    background: rgba(5,7,10,.55); backdrop-filter: blur(3px);
+    padding: 10px;
+  }
+  .panel{
+    width:min(760px, 96vw);
+    background: var(--panel-2);
+    border:1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    overflow:hidden;
+  }
+  .panel header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px;
+    background:#192030;
+    border-bottom:1px solid var(--border);
+  }
+  .panel h3{ margin:0; font-size:16px; letter-spacing:.2px; }
+
+  .iconbtn{
+    width:42px; height:42px; border-radius:12px;
+    display:inline-flex; align-items:center; justify-content:center;
+    border:1px solid var(--border); background:#121722; color:var(--text);
+    cursor:pointer;
+  }
+  .iconbtn.danger{ background:#28181b; border-color:#3a2326; color:#ffdfe1; }
+  .iconbtn svg{ width:22px; height:22px; }
+
+  .content{ padding: 20px; display:flex; flex-direction:column; align-items:center; gap:18px; }
+
+  /* Circular progress */
+  .ring{ width:min(320px, 75vw); aspect-ratio:1/1; position:relative; }
+  .ring svg{ width:100%; height:100%; transform: rotate(-90deg); }
+  .ring .center{
+    position:absolute; inset:0; display:flex; flex-direction:column; place-content:center; place-items:center; text-align:center;
+  }
+  .ring .current{ font-weight:900; font-size:28px; letter-spacing:.4px; }
+  .ring .goal{ margin-top:4px; font-size:13px; color:var(--muted); }
+
+  /* Action buttons */
+  .actions{ display:flex; gap:10px; flex-wrap:wrap; justify-content:center; width:100%; }
+  .btn{
+    border:none; cursor:pointer; padding:12px 18px; border-radius:12px;
+    font-weight:800; letter-spacing:.3px; color:var(--text);
+    background:#232a3b; border:1px solid var(--border);
+    min-width:120px;
+  }
+  .btn.secondary{ background:#1b2130; }
+  .btn.danger{ background:#2a181b; border-color:#3a2326; color:#ffdfe1; }
+  .btn.small{
+    padding:10px; min-width:auto; width:46px; height:46px; border-radius:999px;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  .btn svg{ width:20px; height:20px; }
+
+  /* Confirm modal */
+  .confirm-wrap{ position:fixed; inset:0; display:none; place-items:center; z-index:50; background: rgba(6,8,12,.6); backdrop-filter: blur(2px); padding:10px; }
+  .confirm{
+    width:min(420px, 96vw);
+    background:#161b28; border:1px solid var(--border); border-radius:16px; padding:16px;
+    box-shadow: var(--shadow);
+  }
+  .confirm h4{ margin:4px 0 8px; }
+  .confirm p{ margin:0 0 14px; color:#cfd3df; }
+  .confirm .rowbtn{ display:flex; gap:10px; justify-content:flex-end; }
+  .confirm .rowbtn .btn{ min-width:110px; }
+
+  /* Setup form */
+  .formgrid{ display:grid; gap:20px; width:100%; } /* Increased gap for dropdowns */
+  .field{ display:flex; flex-direction:column; gap:6px; background:#141a26; border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
+  .field label{ font-size:12px; color:var(--muted); }
+  .field input[type="text"], .field input[type="number"], .field input[type="date"], .field input[type="color"]{
+    background:transparent; border:none; outline:none; color:var(--text); font-size:16px;
+  }
+  .row-split{ display:flex; gap:12px; }
+  .row-split .field{ flex:1; }
+
+  .hidden{ display:none !important; }
+</style>
+</head>
+<body>
+
+  <!-- Top Week Selector -->
+  <div class="topbar">
+    <div class="daily-budget" id="dailyBudget">Daily: 0</div>
+    <div id="week" class="week"></div>
+  </div>
+
+  <!-- Tiles -->
+  <div class="container">
+    <div id="tiles" class="tiles"></div>
+  </div>
+
+  <!-- Detail Overlay -->
+  <div id="detailOverlay" class="overlay" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true">
+      <header>
+        <button id="detailBack" class="iconbtn" title="Back" aria-label="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </button>
+        <h3 id="detailTitle">Tile</h3>
+        <button id="detailDelete" class="iconbtn danger" title="Delete tile" aria-label="Delete tile">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </header>
+      <div class="content">
+        <div class="ring" id="ring">
+          <svg id="ringSvg" viewBox="0 0 280 280" aria-hidden="true"></svg>
+          <div class="center">
+            <div class="current" id="ringCurrent">0</div>
+            <div class="goal" id="ringGoal">Goal: 0</div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="btnAdd" class="btn">Add</button>
+          <button id="btnReset" class="btn small" title="Reset to zero" aria-label="Reset to zero">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 1 0 3-6.708M3 5v5h5"/>
+            </svg>
+          </button>
+          <button id="btnGoal" class="btn secondary">Goal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="confirmWrap" class="confirm-wrap" aria-hidden="true">
+    <div class="confirm" role="dialog" aria-modal="true">
+      <h4 id="confirmTitle">Confirm</h4>
+      <p id="confirmMessage">Are you sure?</p>
+      <div class="rowbtn">
+        <button id="confirmNo" class="btn secondary">No</button>
+        <button id="confirmYes" class="btn danger">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Setup (Add Tile) Overlay -->
+  <div id="setupOverlay" class="overlay" aria-hidden="true">
+    <div class="panel" role="dialog" aria-modal="true">
+      <header>
+        <button id="setupBack" class="iconbtn" title="Back" aria-label="Back">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 18l-6-6 6-6"/>
+          </svg>
+        </button>
+        <h3>Add Tile</h3>
+        <span style="width:42px;height:42px"></span>
+      </header>
+      <div class="content">
+        <div class="formgrid">
+          <div class="field">
+            <label for="fName">Name</label>
+            <input id="fName" type="text" placeholder="Calories, Protein, Sleep…">
+          </div>
+          <div class="field">
+            <label for="fGoal">Goal</label>
+            <input id="fGoal" type="number" inputmode="decimal" placeholder="e.g. 2500">
+          </div>
+          <div class="row-split">
+            <div class="field">
+              <label for="fStart">Start Date</label>
+              <input id="fStart" type="date">
+            </div>
+            <div class="field">
+              <label for="fEnd">End Date (optional)</label>
+              <input id="fEnd" type="date">
+            </div>
+          </div>
+          <div class="field">
+            <label for="fColor">Colour</label>
+            <input id="fColor" type="color" value="#6b8cff">
+          </div>
+        </div>
+        <div class="actions">
+          <button id="setupSave" class="btn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+const iso = d => d.toISOString().slice(0,10);
+
+function startOfWeek(date){
+  const d = new Date(date);
+  const day = (d.getDay()+6)%7;
+  d.setDate(d.getDate()-day);
+  d.setHours(0,0,0,0);
+  return d;
+}
+function addDays(date, n){ const d = new Date(date); d.setDate(d.getDate()+n); return d; }
+function escapeHTML(str){ return (str||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+const LS_KEY = 'monkmode.v2';
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return { tiles:[], values:{} };
+    const parsed = JSON.parse(raw);
+    return { tiles: parsed.tiles||[], values: parsed.values||{} };
+  }catch(e){ return { tiles:[], values:{} }; }
+}
+function save(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+
+let state = load();
+let activeDate = iso(new Date());
+let activeTileId = null;
+
+/* ================= Week Render ================= */
+function renderWeek(){
+  const wrap = $('#week'); wrap.innerHTML='';
+  const monday = startOfWeek(new Date(activeDate));
+  const todayISO = iso(new Date());
+  const dows = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  for(let i=0;i<7;i++){
+    const d = addDays(monday, i);
+    const id = iso(d);
+    const el = document.createElement('div');
+    el.className = 'day' + (id===todayISO?' today':'') + (id===activeDate?' active':'');
+    el.innerHTML = `<span class="dow">${dows[i]}</span><span class="date">${d.getDate()}/${d.getMonth()+1}</span>`;
+    el.addEventListener('click', ()=>{ activeDate=id; renderAll(); });
+    wrap.appendChild(el);
+  }
+}
+
+/* ================= Tiles Render ================= */
+function inRange(tile, dateISO){
+  if(tile.startDate && dateISO < tile.startDate) return false;
+  if(tile.endDate && dateISO > tile.endDate) return false;
+  return true;
+}
+function getValue(tileId, dateISO){
+  return (state.values[dateISO] && state.values[dateISO][tileId]) || 0;
+}
+function setValue(tileId, dateISO, val){
+  state.values[dateISO] = state.values[dateISO] || {};
+  state.values[dateISO][tileId] = val;
+  save();
+}
+function deleteTileEverywhere(tileId){
+  state.tiles = state.tiles.filter(t=>t.id!==tileId);
+  for(const d in state.values){
+    if(state.values[d] && tileId in state.values[d]) delete state.values[d][tileId];
+  }
+  save();
+}
+function calculateDailyBudget(){
+  let total = 0;
+  const tiles = state.tiles.filter(t=>inRange(t, activeDate));
+  for(const t of tiles) total += getValue(t.id, activeDate);
+  $('#dailyBudget').textContent = `Daily: ${nf.format(total)}`;
+}
+
+function renderTiles(){
+  const list = $('#tiles'); list.innerHTML='';
+  const tiles = state.tiles.filter(t=>inRange(t, activeDate));
+
+  tiles.forEach(tile=>{
+    const v = getValue(tile.id, activeDate);
+    const div = document.createElement('div');
+    div.className='tile';
+    div.innerHTML=`
+      <div class="delete-tile" title="Delete">×</div>
+      <div class="row">
+        <span class="name">${escapeHTML(tile.name)}</span>
+        <span class="value">${nf.format(v)}</span>
+      </div>`;
+    div.querySelector('.delete-tile').addEventListener('click', e=>{
+      e.stopPropagation();
+      if(confirm(`Delete ${tile.name}?`)) { deleteTileEverywhere(tile.id); renderAll(); }
+    });
+    list.appendChild(div);
+  });
+
+  const addTile = document.createElement('div');
+  addTile.className='tile add';
+  addTile.innerHTML='<div class="plus">+ Add Tile</div>';
+  addTile.addEventListener('click', ()=>{ $('#setupOverlay').style.display='grid'; });
+  list.appendChild(addTile);
+
+  calculateDailyBudget();
+}
+
+function renderAll(){
+  renderWeek();
+  renderTiles();
+}
+renderAll();
+</script>
+</body>
+</html>
